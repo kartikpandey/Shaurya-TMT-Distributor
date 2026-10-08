@@ -8,12 +8,23 @@ import '../profile/profile_screen.dart';
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
 
+  static const int ordersTab = 1;
+
+  /// Switch the bottom-nav tab from anywhere below this screen
+  static void selectTab(BuildContext context, int index) {
+    context.findAncestorStateOfType<_MainNavigationScreenState>()?._select(
+      index,
+    );
+  }
+
   @override
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
+
+  void _select(int index) => setState(() => _currentIndex = index);
 
   late final List<Widget> _screens;
 
@@ -34,9 +45,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       body: _screens[_currentIndex],
       bottomNavigationBar: CustomBottomNav(
         currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() => _currentIndex = index);
-        },
+        onTap: _select,
         items: [
           BottomNavItem(icon: Icons.home, label: 'Home'),
           BottomNavItem(icon: Icons.assignment, label: 'Orders'),

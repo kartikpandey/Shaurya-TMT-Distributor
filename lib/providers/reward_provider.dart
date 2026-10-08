@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../models/reward_ledger.dart';
 import '../models/reward_model.dart';
+import '../services/api_service.dart';
 
 class RewardProvider extends ChangeNotifier {
   RewardBalanceModel _balance = RewardBalanceModel(
@@ -11,6 +13,11 @@ class RewardProvider extends ChangeNotifier {
   List<RewardModel> _rewards = [];
   bool _isLoading = false;
 
+  // Live super-coin ledger
+  RewardLedger? _ledger;
+  bool _isLedgerLoading = false;
+  String? _ledgerError;
+
   // Getters
   RewardBalanceModel get balance => _balance;
   List<RewardModel> get rewards => _rewards;
@@ -19,6 +26,37 @@ class RewardProvider extends ChangeNotifier {
   List<RewardModel> get redeemedRewards =>
       _rewards.where((r) => r.category == 'redeem' && r.isRedeemed).toList();
   bool get isLoading => _isLoading;
+  RewardLedger? get ledger => _ledger;
+  bool get isLedgerLoading => _isLedgerLoading;
+  String? get ledgerError => _ledgerError;
+
+  // Load the user's super-coin ledger and current points
+  Future<void> fetchLedger({String? token}) async {
+    if (_isLedgerLoading) return;
+
+    _isLedgerLoading = true;
+    _ledgerError = null;
+    notifyListeners();
+
+    try {
+      final data = await ApiService.fetchRewardLedger(token: token);
+      _ledger = RewardLedger.fromResponse(data);
+    } on ApiException catch (e) {
+      _ledgerError = e.message;
+    } catch (e) {
+      _ledgerError = 'Unable to load reward points. Please try again.';
+    }
+
+    _isLedgerLoading = false;
+    notifyListeners();
+  }
+
+  // Forget the previous user's ledger on logout
+  void clearLedger() {
+    _ledger = null;
+    _ledgerError = null;
+    notifyListeners();
+  }
 
   RewardProvider() {
     _initializeMockData();

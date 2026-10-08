@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../../config/theme/app_colors.dart';
 import '../../config/theme/app_text_styles.dart';
 
@@ -7,8 +8,13 @@ class KPICard extends StatelessWidget {
   final String value;
   final String subtitle;
   final IconData icon;
+
+  /// SVG asset shown instead of [icon] when set
+  final String? svgAsset;
   final Color accentColor;
-  final double progress; // 0 to 1
+
+  /// 0 to 1; null hides the progress bar
+  final double? progress;
   final VoidCallback? onTap;
 
   const KPICard({
@@ -16,9 +22,10 @@ class KPICard extends StatelessWidget {
     required this.title,
     required this.value,
     required this.subtitle,
-    required this.icon,
+    this.icon = Icons.insights,
+    this.svgAsset,
     required this.accentColor,
-    this.progress = 0.6,
+    this.progress,
     this.onTap,
   });
 
@@ -51,15 +58,26 @@ class KPICard extends StatelessWidget {
                       color: accentColor.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(icon, color: accentColor, size: 24),
+                    child:
+                        svgAsset != null
+                            ? SvgPicture.asset(svgAsset!, width: 24, height: 24)
+                            : Icon(icon, color: accentColor, size: 24),
                   ),
-                  Icon(Icons.trending_up, color: accentColor, size: 16),
+                  Icon(
+                    onTap != null ? Icons.chevron_right : Icons.trending_up,
+                    color: accentColor,
+                    size: onTap != null ? 20 : 16,
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
 
-              // Value
-              Text(value, style: AppTextStyles.numericMedium(context)),
+              // Value, shrunk to fit long amounts
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(value, style: AppTextStyles.numericMedium(context)),
+              ),
               const SizedBox(height: 4),
 
               // Title
@@ -68,23 +86,27 @@ class KPICard extends StatelessWidget {
                 style: AppTextStyles.labelMedium(
                   context,
                 ).copyWith(color: AppColors.textHint),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 12),
 
-              // Progress Ring
-              SizedBox(
-                height: 6,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    backgroundColor:
-                        isDark ? AppColors.borderDark : AppColors.borderLight,
-                    valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+              // Progress bar
+              if (progress != null) ...[
+                SizedBox(
+                  height: 6,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      backgroundColor:
+                          isDark ? AppColors.borderDark : AppColors.borderLight,
+                      valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+              ],
 
               // Subtitle
               Text(
@@ -92,6 +114,8 @@ class KPICard extends StatelessWidget {
                 style: AppTextStyles.labelSmall(
                   context,
                 ).copyWith(color: AppColors.textHint),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),

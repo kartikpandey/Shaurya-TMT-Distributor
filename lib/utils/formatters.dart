@@ -1,6 +1,38 @@
 import 'package:intl/intl.dart';
 
 class AppFormatters {
+  // ---- IST ----
+  // Every time in the app is Indian Standard Time, whatever the phone's
+  // time zone. IST values are held as plain (non-UTC) wall-clock DateTimes.
+
+  static const Duration istOffset = Duration(hours: 5, minutes: 30);
+
+  /// Current date and time in IST
+  static DateTime nowIst() => _istWallClock(DateTime.now().toUtc());
+
+  /// Parse a backend timestamp as IST. Values with a UTC marker or offset
+  /// are converted; values without one are already IST and kept as-is.
+  static DateTime? parseIst(String? value) {
+    if (value == null) return null;
+    final parsed = DateTime.tryParse(value.trim());
+    if (parsed == null) return null;
+    return parsed.isUtc ? _istWallClock(parsed) : parsed;
+  }
+
+  static DateTime _istWallClock(DateTime utc) {
+    final t = utc.add(istOffset);
+    return DateTime(
+      t.year,
+      t.month,
+      t.day,
+      t.hour,
+      t.minute,
+      t.second,
+      t.millisecond,
+      t.microsecond,
+    );
+  }
+
   /// Format currency (Indian Rupees)
   static String formatCurrency(double amount) {
     final formatter = NumberFormat.currency(
@@ -44,7 +76,7 @@ class AppFormatters {
 
   /// Format relative time (e.g., "2 hours ago")
   static String formatRelativeTime(DateTime dateTime) {
-    final now = DateTime.now();
+    final now = nowIst();
     final difference = now.difference(dateTime);
 
     if (difference.inSeconds < 60) {

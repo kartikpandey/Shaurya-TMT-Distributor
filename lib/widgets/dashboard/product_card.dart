@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../config/theme/app_colors.dart';
 import '../../models/product_model.dart';
+import '../../utils/formatters.dart';
 
-class ProductCard extends StatefulWidget {
+class ProductCard extends StatelessWidget {
   final ProductModel product;
   final VoidCallback onAddToCart;
 
@@ -11,13 +12,6 @@ class ProductCard extends StatefulWidget {
     required this.product,
     required this.onAddToCart,
   });
-
-  @override
-  State<ProductCard> createState() => _ProductCardState();
-}
-
-class _ProductCardState extends State<ProductCard> {
-  int _quantity = 1;
 
   @override
   Widget build(BuildContext context) {
@@ -55,7 +49,7 @@ class _ProductCardState extends State<ProductCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.product.name,
+                          product.name,
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -65,16 +59,25 @@ class _ProductCardState extends State<ProductCard> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
-                        Chip(
-                          label: Text(widget.product.grade),
-                          backgroundColor: Colors.white.withOpacity(0.3),
-                          labelStyle: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                          ),
+                        // Compact grade label; a Chip's minimum size
+                        // doesn't fit two-column cards on small phones
+                        Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
                             vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            product.grade,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -88,7 +91,7 @@ class _ProductCardState extends State<ProductCard> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      widget.product.size,
+                      product.size,
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
@@ -100,90 +103,41 @@ class _ProductCardState extends State<ProductCard> {
               ),
             ),
 
-            // Product Details
+            // Price
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildDetailRow(
-                          'Quantity',
-                          '${widget.product.quantity.toStringAsFixed(2)} ${widget.product.unit}',
-                        ),
-                        const SizedBox(height: 8),
-                        _buildDetailRow(
-                          'Unit Price',
-                          '₹${widget.product.unitPrice.toStringAsFixed(2)}',
-                        ),
-                        const SizedBox(height: 8),
-                        _buildDetailRow(
-                          'Total',
-                          '₹${widget.product.totalPrice.toStringAsFixed(2)}',
-                          isBold: true,
-                        ),
-                      ],
+                    Text(
+                      'Price per tonne',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                    // Quantity Selector
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Order Quantity:',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.grey.shade700,
-                          ),
+                    const SizedBox(height: 4),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        AppFormatters.formatCurrency(product.unitPrice),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primaryOrange,
                         ),
-                        const SizedBox(height: 6),
-                        Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.remove),
-                                iconSize: 18,
-                                onPressed:
-                                    _quantity > 1
-                                        ? () {
-                                          setState(() => _quantity--);
-                                        }
-                                        : null,
-                              ),
-                              Text(
-                                '$_quantity',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.add),
-                                iconSize: 18,
-                                onPressed: () {
-                                  setState(() => _quantity++);
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
 
-            // Add to Cart Button
+            // Add to Order Button
             Container(
               width: double.infinity,
               decoration: BoxDecoration(
@@ -194,7 +148,7 @@ class _ProductCardState extends State<ProductCard> {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: widget.onAddToCart,
+                  onTap: onAddToCart,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Row(
@@ -206,12 +160,16 @@ class _ProductCardState extends State<ProductCard> {
                           color: AppColors.primaryOrange,
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          'Add to Cart',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.primaryOrange,
-                            fontSize: 14,
+                        Flexible(
+                          child: Text(
+                            'Add to Order',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primaryOrange,
+                              fontSize: 14,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -223,30 +181,6 @@ class _ProductCardState extends State<ProductCard> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value, {bool isBold = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey.shade600,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
-            color: isBold ? AppColors.primaryOrange : Colors.black87,
-          ),
-        ),
-      ],
     );
   }
 }

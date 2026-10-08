@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../config/theme/app_colors.dart';
 import '../../config/theme/app_text_styles.dart';
 import '../../models/user_model.dart';
+import '../../utils/formatters.dart';
 
 class GreetingCard extends StatelessWidget {
   final UserModel user;
@@ -10,7 +11,7 @@ class GreetingCard extends StatelessWidget {
   const GreetingCard({super.key, required this.user, this.isOnline = true});
 
   String _getGreeting() {
-    final hour = DateTime.now().hour;
+    final hour = AppFormatters.nowIst().hour;
     if (hour < 12) {
       return 'Good Morning';
     } else if (hour < 17) {

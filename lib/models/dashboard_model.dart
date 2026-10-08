@@ -40,7 +40,10 @@ class DashboardModel {
     summary: DashboardSummary.fromJson(
       (json['summary'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
-    dealers: _asMapList(json['dealers']),
+    // The backend has named the children list both ways
+    dealers: _asMapList(
+      json['dealers'] ?? json['dealer_list'] ?? json['dealers_list'],
+    ),
     responseCode: _asInt(json['response_code']) ?? 200,
   );
 
@@ -56,10 +59,7 @@ class DashboardModel {
 // Coerce a JSON array into a list of string-keyed maps, skipping other shapes
 List<Map<String, dynamic>> _asMapList(dynamic value) {
   if (value is! List) return const [];
-  return value
-      .whereType<Map>()
-      .map((e) => e.cast<String, dynamic>())
-      .toList();
+  return value.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
 }
 
 class DashboardSummary {
@@ -98,14 +98,15 @@ class DashboardSummary {
   };
 
   // Total orders across every pipeline stage
-  int get totalOrders =>
-      openOrders + approvedOrders + pendingDispatch;
+  int get totalOrders => openOrders + approvedOrders + pendingDispatch;
 
   // True when any stage needs attention
   bool get hasActionableItems =>
-      openOrders > 0 || approvedOrders > 0 || pendingDispatch > 0 || returns > 0;
+      openOrders > 0 ||
+      approvedOrders > 0 ||
+      pendingDispatch > 0 ||
+      returns > 0;
 
   // Stock health severity, used to pick the accent colour
-  bool get isStockCritical =>
-      stockHealth == 'critical' || stockHealth == 'low';
+  bool get isStockCritical => stockHealth == 'critical' || stockHealth == 'low';
 }

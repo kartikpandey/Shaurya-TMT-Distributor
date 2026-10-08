@@ -3,6 +3,10 @@ import 'package:provider/provider.dart';
 import '../../config/theme/app_colors.dart';
 import '../../config/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/cart_provider.dart';
+import '../../providers/dashboard_provider.dart';
+import '../../providers/order_provider.dart';
+import '../../providers/reward_provider.dart';
 import '../../widgets/common/custom_app_bar.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -162,6 +166,11 @@ class ProfileScreen extends StatelessWidget {
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: () {
+                        // Don't carry this user's data over to the next user
+                        context.read<CartProvider>().clear();
+                        context.read<OrderProvider>().clear();
+                        context.read<DashboardProvider>().clear();
+                        context.read<RewardProvider>().clearLedger();
                         authProvider.logout();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(

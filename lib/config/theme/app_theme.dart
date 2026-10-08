@@ -20,7 +20,7 @@ class AppTheme {
       ),
       iconTheme: const IconThemeData(color: AppColors.textDark),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: AppColors.lightSurface,
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -103,7 +103,7 @@ class AppTheme {
       ),
       iconTheme: const IconThemeData(color: AppColors.textLight),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: AppColors.darkSurface,
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme/app_colors.dart';
 import '../../config/theme/app_text_styles.dart';
+import '../../models/reward_ledger.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/reward_provider.dart';
 import '../../widgets/common/custom_app_bar.dart';
 import '../../utils/formatters.dart';
@@ -21,7 +23,18 @@ class _RewardsLoyaltyScreenState extends State<RewardsLoyaltyScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    context.read<RewardProvider>().fetchRewards();
+    // Load after the first frame: providers notify listeners as they load,
+    // which isn't allowed while this screen is still building
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<RewardProvider>().fetchRewards();
+      _loadLedger();
+    });
+  }
+
+  Future<void> _loadLedger() {
+    return context.read<RewardProvider>().fetchLedger(
+      token: context.read<AuthProvider>().authToken,
+    );
   }
 
   @override
@@ -68,12 +81,24 @@ class _RewardsLoyaltyScreenState extends State<RewardsLoyaltyScreen>
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              '${rewardProvider.balance.availableCoins}',
-                              style: AppTextStyles.displayLarge(
-                                context,
-                              ).copyWith(color: Colors.white),
-                            ),
+                            rewardProvider.isLedgerLoading &&
+                                    rewardProvider.ledger == null
+                                ? const SizedBox(
+                                  height: 40,
+                                  width: 40,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                  ),
+                                )
+                                : Text(
+                                  // Total current reward points
+                                  rewardProvider.ledger != null
+                                      ? '${rewardProvider.ledger!.balance}'
+                                      : '—',
+                                  style: AppTextStyles.displayLarge(
+                                    context,
+                                  ).copyWith(color: Colors.white),
+                                ),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -98,11 +123,11 @@ class _RewardsLoyaltyScreenState extends State<RewardsLoyaltyScreen>
                           children: [
                             _buildBalanceInfo(
                               'Total Earned',
-                              '${rewardProvider.balance.totalCoins}',
+                              '${rewardProvider.ledger?.totalEarned ?? '—'}',
                             ),
                             _buildBalanceInfo(
                               'Redeemed',
-                              '${rewardProvider.balance.redeemedCoins}',
+                              '${rewardProvider.ledger?.totalRedeemed ?? '—'}',
                             ),
                           ],
                         ),
@@ -344,51 +369,142 @@ class _RewardsLoyaltyScreenState extends State<RewardsLoyaltyScreen>
     );
   }
 
+  // Reward ledger: every super-coin credit and debit, newest first
   Widget _buildActivityTab(BuildContext context) {
     return Consumer<RewardProvider>(
       builder: (context, rewardProvider, _) {
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: rewardProvider.rewards.length,
-          itemBuilder: (context, index) {
-            final reward = rewardProvider.rewards[index];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          reward.title,
-                          style: AppTextStyles.titleMedium(context),
-                        ),
-                        Text(
-                          AppFormatters.formatRelativeTime(reward.date),
-                          style: AppTextStyles.labelSmall(
-                            context,
-                          ).copyWith(color: AppColors.textHint),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    '${reward.category == 'earn' ? '+' : '-'}${reward.pointsValue}',
-                    style: AppTextStyles.titleMedium(context).copyWith(
-                      color:
-                          reward.category == 'earn'
-                              ? AppColors.successGreen
-                              : AppColors.warningRed,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
+        final ledger = rewardProvider.ledger;
+
+        if (rewardProvider.isLedgerLoading && ledger == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (ledger == null) {
+          return _buildLedgerMessage(
+            context,
+            Icons.cloud_off,
+            rewardProvider.ledgerError ?? 'Unable to load reward ledger.',
+            showRetry: true,
+          );
+        }
+        if (ledger.entries.isEmpty) {
+          return _buildLedgerMessage(
+            context,
+            Icons.receipt_long_outlined,
+            'No reward activity yet',
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: _loadLedger,
+          child: ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: ledger.entries.length,
+            separatorBuilder:
+                (_, __) =>
+                    const Divider(height: 1, color: AppColors.borderLight),
+            itemBuilder:
+                (context, index) => _buildLedgerRow(context, ledger, index),
+          ),
         );
       },
+    );
+  }
+
+  Widget _buildLedgerRow(BuildContext context, RewardLedger ledger, int index) {
+    final entry = ledger.entries[index];
+    final color =
+        entry.isCredit ? AppColors.successGreen : AppColors.warningRed;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              entry.isCredit ? Icons.south_west : Icons.north_east,
+              size: 18,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.description,
+                  style: AppTextStyles.titleSmall(context),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (entry.orderId != null) entry.orderId!,
+                    if (entry.date != null)
+                      AppFormatters.formatDateTime(entry.date!),
+                  ].join(' · '),
+                  style: AppTextStyles.labelSmall(
+                    context,
+                  ).copyWith(color: AppColors.textHint),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${entry.isCredit ? '+' : '−'}${entry.coins}',
+                style: AppTextStyles.titleMedium(
+                  context,
+                ).copyWith(color: color, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Bal ${ledger.balanceAfter(index)}',
+                style: AppTextStyles.labelSmall(
+                  context,
+                ).copyWith(color: AppColors.textHint),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLedgerMessage(
+    BuildContext context,
+    IconData icon,
+    String message, {
+    bool showRetry = false,
+  }) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 40, color: AppColors.textHint),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              style: AppTextStyles.bodyMedium(context),
+              textAlign: TextAlign.center,
+            ),
+            if (showRetry)
+              TextButton.icon(
+                onPressed: _loadLedger,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

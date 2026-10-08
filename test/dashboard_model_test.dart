@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:distributor/config/constants/app_constants.dart';
 import 'package:distributor/models/dashboard_model.dart';
+import 'package:distributor/models/network_member.dart';
 import 'package:distributor/services/api_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -132,6 +133,37 @@ void main() {
 
       expect(dashboard.dealers, hasLength(1));
       expect(dashboard.dealers.first['name'], 'Jain Mining Co.');
+    });
+  });
+
+  group('network children', () {
+    test('reads the children list from dealer_list too', () {
+      final dashboard = DashboardModel.fromJson({
+        'dealer_list': [
+          {'id': 77, 'name': 'Rahul Traders', 'phone': '9876543210', 'store': null},
+        ],
+      });
+
+      expect(dashboard.dealers, hasLength(1));
+    });
+
+    test('parses id, name, phone and store', () {
+      final member = NetworkMember.tryParse({
+        'id': '77',
+        'name': 'Rahul Traders',
+        'phone': '9876543210',
+        'store': null,
+      })!;
+
+      expect(member.id, 77);
+      expect(member.name, 'Rahul Traders');
+      expect(member.phone, '9876543210');
+      expect(member.store, isNull);
+    });
+
+    test('skips entries without a usable id', () {
+      expect(NetworkMember.tryParse({'name': 'No id'}), isNull);
+      expect(NetworkMember.tryParse({'id': 'abc', 'name': 'Bad'}), isNull);
     });
   });
 }

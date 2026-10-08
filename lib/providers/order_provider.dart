@@ -1,202 +1,161 @@
 import 'package:flutter/material.dart';
-import '../models/order_model.dart';
-import '../models/product_model.dart';
+import '../models/distribution_order.dart';
+import '../services/api_service.dart';
+import '../utils/formatters.dart';
 
 class OrderProvider extends ChangeNotifier {
-  List<OrderModel> _orders = [];
+  List<DistributionOrder> _orders = [];
   bool _isLoading = false;
-  String? _selectedOrderId;
+  String? _errorMessage;
+  bool _isSubmitting = false;
+  String? _submitError;
+  String? _lastOrderReference;
+  final Set<String> _approving = {};
 
   // Getters
-  List<OrderModel> get orders => _orders;
+
+  /// The user's own and children's orders, newest first
+  List<DistributionOrder> get orders => _orders;
   bool get isLoading => _isLoading;
-  OrderModel? get selectedOrder =>
-      _selectedOrderId != null
-          ? _orders.firstWhere(
-            (o) => o.id == _selectedOrderId,
-            orElse: () => _orders.first,
-          )
-          : null;
+  String? get errorMessage => _errorMessage;
+  bool get isSubmitting => _isSubmitting;
+  String? get submitError => _submitError;
+  String? get lastOrderReference => _lastOrderReference;
 
-  OrderProvider() {
-    _initializeMockData();
+  List<DistributionOrder> recentOrders([int count = 5]) =>
+      _orders.take(count).toList();
+
+  List<DistributionOrder> get awaitingApproval =>
+      _orders.where((o) => o.isAwaitingApproval).toList();
+
+  /// Total value of orders dated in the current IST calendar month
+  double get currentMonthOrderValue {
+    final now = AppFormatters.nowIst();
+    return _orders
+        .where((o) => o.date?.year == now.year && o.date?.month == now.month)
+        .fold(0.0, (sum, o) => sum + o.totalAmount);
   }
 
-  // Initialize mock data
-  void _initializeMockData() {
-    _orders = [
-      OrderModel(
-        orderId: 'ORD-001',
-        dealerId: '1',
-        dealerName: 'Jain Mining Co.',
-        dealerEmail: 'contact@jainmining.com',
-        products: [
-          ProductModel(
-            name: 'ShauryaTMT 6mm',
-            size: '6mm',
-            grade: 'Grade A',
-            quantity: 50,
-            unitPrice: 500,
-            totalPrice: 25000,
-            unit: 'tonnes',
-          ),
-          ProductModel(
-            name: 'ShauryaTMT 10mm',
-            size: '10mm',
-            grade: 'Grade B',
-            quantity: 30,
-            unitPrice: 450,
-            totalPrice: 13500,
-            unit: 'tonnes',
-          ),
-        ],
-        totalAmount: 38500,
-        totalUnits: 80,
-        status: 'confirmed',
-        paymentStatus: 'paid',
-        orderDate: DateTime.now().subtract(const Duration(days: 5)),
-        expectedDeliveryDate: DateTime.now().add(const Duration(days: 5)),
-      ),
-      OrderModel(
-        orderId: 'ORD-002',
-        dealerId: '2',
-        dealerName: 'Sudama Traders',
-        dealerEmail: 'info@sudama.com',
-        products: [
-          ProductModel(
-            name: 'ShauryaTMT 8mm',
-            size: '8mm',
-            grade: 'Grade A',
-            quantity: 75,
-            unitPrice: 480,
-            totalPrice: 36000,
-            unit: 'tonnes',
-          ),
-        ],
-        totalAmount: 36000,
-        totalUnits: 75,
-        status: 'shipped',
-        paymentStatus: 'paid',
-        orderDate: DateTime.now().subtract(const Duration(days: 3)),
-        expectedDeliveryDate: DateTime.now().add(const Duration(days: 2)),
-        trackingNumber: 'TRACK-12345',
-      ),
-      OrderModel(
-        orderId: 'ORD-003',
-        dealerId: '3',
-        dealerName: 'Maruthi Hardware',
-        dealerEmail: 'orders@maruthi.com',
-        products: [
-          ProductModel(
-            name: 'ShauryaTMT 12mm',
-            size: '12mm',
-            grade: 'Grade A',
-            quantity: 100,
-            unitPrice: 520,
-            totalPrice: 52000,
-            unit: 'tonnes',
-          ),
-          ProductModel(
-            name: 'ShauryaTMT 16mm',
-            size: '16mm',
-            grade: 'Grade B',
-            quantity: 60,
-            unitPrice: 500,
-            totalPrice: 30000,
-            unit: 'tonnes',
-          ),
-        ],
-        totalAmount: 82000,
-        totalUnits: 160,
-        status: 'pending',
-        paymentStatus: 'partial',
-        orderDate: DateTime.now().subtract(const Duration(days: 1)),
-        expectedDeliveryDate: DateTime.now().add(const Duration(days: 7)),
-      ),
-    ];
-  }
+  /// Statuses present in the loaded orders, for filter chips
+  List<String> get statuses => {..._orders.map((o) => o.status)}.toList();
 
-  // Fetch orders
-  Future<void> fetchOrders() async {
+  bool isApproving(String orderId) => _approving.contains(orderId);
+
+  // Fetch orders from the distribution orders API
+  Future<void> fetchOrders({String? token}) async {
+    if (_isLoading) return;
+
     _isLoading = true;
+    _errorMessage = null;
     notifyListeners();
 
     try {
-      await Future.delayed(const Duration(seconds: 1));
-      _isLoading = false;
-      notifyListeners();
+      final data = await ApiService.fetchDistributionOrders(token: token);
+      final items = data['items'];
+      _orders =
+          (items is List ? items : const [])
+              .whereType<Map>()
+              .map((e) => DistributionOrder.tryParse(e.cast<String, dynamic>()))
+              .whereType<DistributionOrder>()
+              .toList()
+            ..sort(DistributionOrder.newestFirst);
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
     } catch (e) {
-      _isLoading = false;
-      notifyListeners();
+      _errorMessage = 'Unable to load orders. Please try again.';
     }
+
+    _isLoading = false;
+    notifyListeners();
   }
 
-  // Get order by ID
-  OrderModel? getOrderById(String orderId) {
+  /// Approve a placed order, then reload the list so its status updates.
+  /// Returns null on success, otherwise an error message.
+  Future<String?> approveOrder(String orderId, {String? token}) async {
+    if (_approving.contains(orderId)) return null;
+
+    _approving.add(orderId);
+    notifyListeners();
+
     try {
-      return _orders.firstWhere((o) => o.id == orderId);
-    } catch (e) {
+      await ApiService.approveOrder(orderId: orderId, token: token);
+      _approving.remove(orderId);
+      await fetchOrders(token: token);
       return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'Could not approve order. Please try again.';
+    } finally {
+      if (_approving.remove(orderId)) notifyListeners();
     }
   }
 
-  // Get orders by dealer
-  List<OrderModel> getOrdersByDealer(String dealerId) {
-    return _orders.where((o) => o.dealerId == dealerId).toList();
+  /// Replace an unapproved order's note and lines, then reload the list.
+  /// Returns null on success, otherwise an error message.
+  Future<String?> editOrder({
+    required Map<String, dynamic> payload,
+    String? token,
+  }) async {
+    try {
+      await ApiService.editOrder(payload: payload, token: token);
+      await fetchOrders(token: token);
+      return null;
+    } on ApiException catch (e) {
+      return e.statusCode == 404
+          ? 'Order editing is not available on the server yet.'
+          : e.message;
+    } catch (e) {
+      return 'Could not update order. Please try again.';
+    }
   }
 
-  // Get orders by status
-  List<OrderModel> getOrdersByStatus(String status) {
-    return _orders.where((o) => o.status == status).toList();
-  }
+  // Place a new order with the create-order API.
+  // Returns true on success; otherwise [submitError] explains why.
+  Future<bool> submitOrder({
+    required Map<String, dynamic> payload,
+    String? token,
+  }) async {
+    if (_isSubmitting) return false;
 
-  // Select order
-  void selectOrder(String orderId) {
-    _selectedOrderId = orderId;
-    notifyListeners();
-  }
-
-  // Create new order
-  Future<bool> createOrder(OrderModel order) async {
-    _isLoading = true;
+    _isSubmitting = true;
+    _submitError = null;
+    _lastOrderReference = null;
     notifyListeners();
 
     try {
-      await Future.delayed(const Duration(seconds: 1));
-      _orders.add(order);
-      _isLoading = false;
-      notifyListeners();
+      final data = await ApiService.createOrder(payload: payload, token: token);
+      _lastOrderReference = _extractOrderReference(data);
       return true;
+    } on ApiException catch (e) {
+      _submitError = e.message;
+      return false;
     } catch (e) {
-      _isLoading = false;
+      _submitError = 'Could not place order. Please try again.';
+      return false;
+    } finally {
+      _isSubmitting = false;
       notifyListeners();
-      return false;
     }
   }
 
-  // Update order status
-  Future<bool> updateOrderStatus(String orderId, String newStatus) async {
-    try {
-      final index = _orders.indexWhere((o) => o.id == orderId);
-      if (index != -1) {
-        _orders[index] = _orders[index].copyWith(status: newStatus);
-        notifyListeners();
-        return true;
+  // Response schema is unconfirmed, so look for an order id in likely places
+  String? _extractOrderReference(Map<String, dynamic> data) {
+    for (final source in [data, data['data'], data['order']]) {
+      if (source is! Map) continue;
+      for (final key in const ['order_number', 'order_id', 'id']) {
+        final value = source[key];
+        if (value is String && value.isNotEmpty) return value;
+        if (value is num) return value.toString();
       }
-      return false;
-    } catch (e) {
-      return false;
     }
+    return null;
   }
 
-  // Get total orders count
-  int get totalOrdersCount => _orders.length;
-
-  // Get pending orders count
-  int get pendingOrdersCount =>
-      _orders.where((o) => o.status == 'pending').length;
-
-  // Get total order value
-  double get totalOrderValue =>
-      _orders.fold(0, (sum, order) => sum + order.totalAmount);
+  // Forget the previous user's orders on logout
+  void clear() {
+    _orders = [];
+    _errorMessage = null;
+    notifyListeners();
+  }
 }

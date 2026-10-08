@@ -3,9 +3,13 @@ import 'package:provider/provider.dart';
 import '../../config/theme/app_colors.dart';
 import '../../config/theme/app_text_styles.dart';
 import '../../models/product_model.dart';
+import '../../providers/cart_provider.dart';
 import '../../providers/product_provider.dart';
+import '../../utils/formatters.dart';
 import '../../widgets/common/custom_app_bar.dart';
 import '../../widgets/dashboard/product_card.dart';
+import '../../widgets/orders/tonnage_input.dart';
+import '../orders/create_order/order_review_screen.dart';
 
 class ProductListingScreen extends StatefulWidget {
   const ProductListingScreen({super.key});
@@ -48,6 +52,7 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: const CustomAppBar(title: 'Products'),
+      bottomNavigationBar: _buildCartBar(context),
       body: Consumer<ProductProvider>(
         builder: (context, productProvider, _) {
           return Column(
@@ -88,7 +93,9 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
                           gridDelegate:
                               const SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: 2,
-                                childAspectRatio: 0.7,
+                                // Fixed height: a ratio made cards too short
+                                // on narrow phones
+                                mainAxisExtent: 270,
                                 crossAxisSpacing: 8,
                                 mainAxisSpacing: 8,
                               ),
@@ -98,11 +105,7 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
                             return ProductCard(
                               product: product,
                               onAddToCart: () {
-                                _showAddToCartDialog(
-                                  context,
-                                  product,
-                                  productProvider,
-                                );
+                                _showAddToCartDialog(context, product);
                               },
                             );
                           },
@@ -225,17 +228,13 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
     );
   }
 
-  void _showAddToCartDialog(
-    BuildContext context,
-    ProductModel product,
-    ProductProvider productProvider,
-  ) {
-    int quantity = 1;
+  void _showAddToCartDialog(BuildContext context, ProductModel product) {
+    double quantity = 1;
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return StatefulBuilder(
-          builder: (context, setState) {
+          builder: (dialogContext, setState) {
             return AlertDialog(
               title: Text(product.name),
               content: Column(
@@ -248,63 +247,45 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Available: ${product.quantity} ${product.unit}',
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Price per unit: ₹${product.unitPrice}',
+                    'Price per tonne: ${AppFormatters.formatCurrency(product.unitPrice)}',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      const Text('Quantity:'),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.remove),
-                        onPressed:
-                            quantity > 1
-                                ? () {
-                                  setState(() => quantity--);
-                                }
-                                : null,
-                      ),
-                      Text(
-                        '$quantity',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add),
-                        onPressed: () {
-                          setState(() => quantity++);
-                        },
-                      ),
-                    ],
-                  ),
+                  const Text('Quantity (tonnes):'),
                   const SizedBox(height: 8),
+                  TonnageInput(
+                    value: quantity,
+                    onChanged: (tonnes) => setState(() => quantity = tonnes),
+                  ),
+                  const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: AppColors.primaryOrange.withOpacity(0.1),
+                      color: AppColors.primaryOrange.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('Total:'),
-                        Text(
-                          '₹${(product.unitPrice * quantity).toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: AppColors.primaryOrange,
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              AppFormatters.formatCurrency(
+                                product.unitPrice * quantity,
+                              ),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: AppColors.primaryOrange,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -314,30 +295,80 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(dialogContext),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    productProvider.addProductToCart(
-                      product,
-                      quantity.toDouble(),
-                    );
-                    Navigator.pop(context);
+                    context.read<CartProvider>().add(product, quantity);
+                    Navigator.pop(dialogContext);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
-                          '${product.name} (qty: $quantity) added to cart',
+                          '${product.name} (${TonnageInput.format(quantity)} t) added to order',
                         ),
                         duration: const Duration(seconds: 2),
                       ),
                     );
                   },
-                  child: const Text('Add to Cart'),
+                  child: const Text('Add to Order'),
                 ),
               ],
             );
           },
+        );
+      },
+    );
+  }
+
+  // Sticky summary of the order being built, linking to the review screen
+  Widget _buildCartBar(BuildContext context) {
+    return Consumer<CartProvider>(
+      builder: (context, cart, _) {
+        if (cart.isEmpty) return const SizedBox.shrink();
+        return SafeArea(
+          child: Material(
+            color: AppColors.primaryOrange,
+            child: InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const OrderReviewScreen()),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.shopping_cart, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '${cart.itemCount} items · '
+                        '${TonnageInput.format(cart.totalTonnes)} t · '
+                        '${AppFormatters.formatCurrency(cart.totalAmount)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      'Review',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: Colors.white),
+                  ],
+                ),
+              ),
+            ),
+          ),
         );
       },
     );

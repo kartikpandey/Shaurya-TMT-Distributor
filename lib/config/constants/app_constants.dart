@@ -8,8 +8,15 @@ class AppConstants {
   // API Endpoints
   static const String baseUrl = 'http://167.71.227.184/api/v1';
   static const String loginEndpoint = '$baseUrl/login';
-  static const String ordersEndpoint = '$baseUrl/orders';
+  static const String ordersEndpoint = '$baseUrl/distribution/orders/';
+  static const String createOrderEndpoint =
+      '$baseUrl/distribution/orders/create/';
+  static const String approveOrderEndpoint =
+      '$baseUrl/distribution/orders/approve/';
+  static const String editOrderEndpoint = '$baseUrl/distribution/orders/edit/';
   static const String rewardsEndpoint = '$baseUrl/rewards';
+  // Super-coin ledger and current points for the logged-in user
+  static const String rewardLedgerEndpoint = '$baseUrl/distribution/rewards/';
   static const String dashboardEndpoint = '$baseUrl/distribution/dashboard/';
 
   // DRF token auth header format: 'Authorization: Token <token>'

@@ -3,14 +3,19 @@ import 'package:provider/provider.dart';
 import '../../config/theme/app_colors.dart';
 import '../../config/theme/app_text_styles.dart';
 import '../../models/dashboard_model.dart';
+import '../../models/order_target.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../providers/order_provider.dart';
+import '../../utils/formatters.dart';
 import '../../widgets/dashboard/dealer_card.dart';
 import '../../widgets/dashboard/greeting_card.dart';
 import '../../widgets/dashboard/kpi_card.dart';
 import '../../widgets/dashboard/order_summary_card.dart';
-import '../../widgets/dashboard/stock_health_banner.dart';
+import '../../widgets/orders/order_detail_sheet.dart';
+import '../../widgets/orders/order_target_picker.dart';
+import '../navigation/main_navigation_screen.dart';
+import '../orders/awaiting_approval_screen.dart';
 import 'product_listing_screen.dart';
 
 class HomeDashboardScreen extends StatefulWidget {
@@ -25,16 +30,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadDashboard());
-    context.read<OrderProvider>().fetchOrders();
   }
 
-  // Load dashboard data using the token captured at login
+  // Load dashboard summary and orders using the token captured at login
   Future<void> _loadDashboard({bool force = false}) async {
     final token = context.read<AuthProvider>().authToken;
-    await context.read<DashboardProvider>().fetchDashboard(
-      token: token,
-      force: force,
-    );
+    await Future.wait([
+      context.read<DashboardProvider>().fetchDashboard(
+        token: token,
+        force: force,
+      ),
+      context.read<OrderProvider>().fetchOrders(token: token),
+    ]);
   }
 
   @override
@@ -64,10 +71,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   _buildDashboardSection(context),
                   const SizedBox(height: 24),
 
-                  // Quick Actions
-                  _buildQuickActions(context),
-                  const SizedBox(height: 24),
-
                   // Dealers
                   _buildDealersSection(context),
                   const SizedBox(height: 24),
@@ -76,12 +79,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Recent Orders',
-                        style: AppTextStyles.headlineSmall(context),
+                      Expanded(
+                        child: Text(
+                          'Recent Orders',
+                          style: AppTextStyles.headlineSmall(context),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       TextButton(
-                        onPressed: () {},
+                        onPressed:
+                            () => MainNavigationScreen.selectTab(
+                              context,
+                              MainNavigationScreen.ordersTab,
+                            ),
                         child: Text(
                           'View All',
                           style: AppTextStyles.labelMedium(
@@ -92,41 +103,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-
-                  // Orders List
-                  Consumer<OrderProvider>(
-                    builder: (context, orderProvider, _) {
-                      if (orderProvider.isLoading) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-
-                      if (orderProvider.orders.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-
-                      final recentOrders =
-                          orderProvider.orders.take(3).toList();
-
-                      return ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: recentOrders.length,
-                        itemBuilder: (context, index) {
-                          final order = recentOrders[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: OrderSummaryCard(
-                              order: order,
-                              onTap: () {
-                                orderProvider.selectOrder(order.id);
-                                // Navigate to order details
-                              },
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                  _buildRecentOrders(context),
                 ],
               ),
             ),
@@ -134,14 +111,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const ProductListingScreen(),
-            ),
-          );
-        },
+        onPressed: () => _openNewOrder(context),
         child: const Icon(Icons.add),
       ),
     );
@@ -165,72 +135,138 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           return _buildErrorCard(context, dashboardProvider.errorMessage);
         }
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Stock Health Banner
-            StockHealthBanner(
-              stockHealth: summary.stockHealth,
-              openOrders: summary.openOrders,
-            ),
-            const SizedBox(height: 16),
-
-            // KPI Grid
-            _buildKPISummary(context, summary),
-          ],
-        );
+        return _buildKPISummary(context, summary);
       },
     );
   }
 
-  // KPI grid built from the API summary block
+  // KPI grid: order pipeline from the dashboard API, plus this month's
+  // order value and the user's active children
   Widget _buildKPISummary(BuildContext context, DashboardSummary summary) {
     final total = summary.totalOrders;
 
     // Share of the pipeline, used for the progress bars
     double share(int value) => total == 0 ? 0 : value / total;
 
-    return GridView.count(
-      crossAxisCount: 2,
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+    final orders = context.watch<OrderProvider>();
+    final awaiting = orders.awaitingApproval.length;
+    final identity = OrderingIdentity.of(context.read<AuthProvider>());
+    final childCount = _children(context).length;
+
+    final tiles = [
+      KPICard(
+        title: 'Open Orders',
+        value: '${summary.openOrders}',
+        subtitle: 'In progress',
+        icon: Icons.shopping_bag_outlined,
+        accentColor: AppColors.primaryOrange,
+        progress: share(summary.openOrders),
+      ),
+      KPICard(
+        title: 'Approved',
+        value: '${summary.approvedOrders}',
+        subtitle:
+            awaiting == 0
+                ? 'None awaiting approval'
+                : '$awaiting awaiting approval',
+        icon: Icons.verified_outlined,
+        accentColor: AppColors.successGreen,
+        progress: share(summary.approvedOrders),
+        onTap:
+            () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AwaitingApprovalScreen()),
+            ),
+      ),
+      KPICard(
+        title: 'Order Value',
+        value: AppFormatters.formatCurrency(orders.currentMonthOrderValue),
+        subtitle: AppFormatters.formatDate(AppFormatters.nowIst(), 'MMMM yyyy'),
+        svgAsset: 'assets/images/kpi_order_value.svg',
+        accentColor: AppColors.accentBlue,
+      ),
+      KPICard(
+        title:
+            identity.role == OrderingRole.distributor
+                ? 'Active Dealers'
+                : 'Active Sub-dealers',
+        value: '$childCount',
+        subtitle: 'Linked to your account',
+        svgAsset: 'assets/images/kpi_network.svg',
+        accentColor: const Color(0xFF7C3AED),
+      ),
+    ];
+
+    // Two rows sized to their content, so tiles never clip at small widths
+    // or large font sizes
+    Widget row(Widget a, Widget b) => IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: a),
+          const SizedBox(width: 12),
+          Expanded(child: b),
+        ],
+      ),
+    );
+
+    return Column(
       children: [
-        KPICard(
-          title: 'Open Orders',
-          value: '${summary.openOrders}',
-          subtitle: 'Awaiting approval',
-          icon: Icons.shopping_bag_outlined,
-          accentColor: AppColors.primaryOrange,
-          progress: share(summary.openOrders),
-        ),
-        KPICard(
-          title: 'Approved',
-          value: '${summary.approvedOrders}',
-          subtitle: 'Confirmed by dealer',
-          icon: Icons.verified_outlined,
-          accentColor: AppColors.successGreen,
-          progress: share(summary.approvedOrders),
-        ),
-        KPICard(
-          title: 'Pending Dispatch',
-          value: '${summary.pendingDispatch}',
-          subtitle: 'Ready to ship',
-          icon: Icons.local_shipping_outlined,
-          accentColor: AppColors.accentBlue,
-          progress: share(summary.pendingDispatch),
-        ),
-        KPICard(
-          title: 'Returns',
-          value: '${summary.returns}',
-          subtitle: 'Flagged for pickup',
-          icon: Icons.assignment_return_outlined,
-          accentColor:
-              summary.returns > 0 ? AppColors.warningRed : AppColors.textHint,
-          progress: share(summary.returns),
-        ),
+        row(tiles[0], tiles[1]),
+        const SizedBox(height: 12),
+        row(tiles[2], tiles[3]),
       ],
+    );
+  }
+
+  // The user's direct children, without the user themselves (the dashboard
+  // list can include them)
+  List<Map<String, dynamic>> _children(BuildContext context) {
+    final selfId = OrderingIdentity.of(context.read<AuthProvider>()).selfId;
+    return context
+        .read<DashboardProvider>()
+        .dealers
+        .where((d) => '${d['id']}' != '$selfId')
+        .toList();
+  }
+
+  // Latest five orders, newest first
+  Widget _buildRecentOrders(BuildContext context) {
+    return Consumer<OrderProvider>(
+      builder: (context, orderProvider, _) {
+        if (orderProvider.isLoading && orderProvider.orders.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (orderProvider.orders.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: Text(
+                orderProvider.errorMessage ?? 'No orders yet',
+                style: AppTextStyles.bodyMedium(
+                  context,
+                ).copyWith(color: AppColors.textHint),
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          children:
+              orderProvider
+                  .recentOrders()
+                  .map(
+                    (order) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: OrderSummaryCard(
+                        order: order,
+                        onTap: () => showOrderDetailSheet(context, order),
+                      ),
+                    ),
+                  )
+                  .toList(),
+        );
+      },
     );
   }
 
@@ -238,7 +274,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Widget _buildDealersSection(BuildContext context) {
     return Consumer<DashboardProvider>(
       builder: (context, dashboardProvider, _) {
-        final dealers = dashboardProvider.dealers;
+        final dealers = _children(context);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -336,72 +372,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildQuickActions(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        _buildActionButton(
-          context,
-          Icons.add_circle_outline,
-          'New Order',
-          AppColors.primaryOrange,
-        ),
-        _buildActionButton(
-          context,
-          Icons.assignment_outlined,
-          'View Reports',
-          Colors.blue,
-        ),
-        // _buildActionButton(
-        //   context,
-        //   Icons.local_shipping_outlined,
-        //   'Track Shipment',
-        //   Colors.purple,
-        // ),
-        _buildActionButton(
-          context,
-          Icons.settings_outlined,
-          'Settings',
-          Colors.grey,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButton(
-    BuildContext context,
-    IconData icon,
-    String label,
-    Color color,
-  ) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {},
-              borderRadius: BorderRadius.circular(12),
-              child: Center(child: Icon(icon, color: color, size: 28)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: AppTextStyles.labelSmall(context),
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
+  // Start (or resume) building an order from the product catalog
+  void _openNewOrder(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ProductListingScreen()),
     );
   }
 }

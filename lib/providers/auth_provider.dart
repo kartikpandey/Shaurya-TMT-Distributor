@@ -13,6 +13,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _authToken;
   String? _errorMessage;
+  int? _userTypeId;
 
   // Getters
   UserModel? get currentUser => _currentUser;
@@ -20,6 +21,9 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get authToken => _authToken;
   String? get errorMessage => _errorMessage;
+
+  /// Login API user type (1-7), see AppConstants; null for mock OTP logins
+  int? get userTypeId => _userTypeId;
 
   // Login via API
   Future<bool> login(
@@ -43,9 +47,10 @@ class AuthProvider extends ChangeNotifier {
       // Save every info received from the response
       await prefs.setString(
         AppConstants.loginResponseKey,
-        jsonEncode(data),
+        jsonEncode(_withoutSecrets(data)),
       );
       await prefs.setInt(AppConstants.userTypeKey, userType);
+      _userTypeId = userType;
 
       final token = _extractToken(data);
       if (token != null) {
@@ -98,8 +103,10 @@ class AuthProvider extends ChangeNotifier {
       }
     }
 
+    final int? savedUserType = prefs.getInt(AppConstants.userTypeKey);
+    _userTypeId = savedUserType;
+
     if (responseData != null) {
-      final int? savedUserType = prefs.getInt(AppConstants.userTypeKey);
       _currentUser = _buildUserFromResponse(
         responseData,
         _extractUsername(responseData, savedUser),
@@ -184,6 +191,7 @@ class AuthProvider extends ChangeNotifier {
 
     _currentUser = null;
     _authToken = null;
+    _userTypeId = null;
     _isLoggedIn = false;
     _errorMessage = null;
     notifyListeners();
@@ -207,6 +215,18 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _isLoggedIn && _currentUser != null;
 
   // ---- Helpers ----
+
+  // The login response includes the user's password hash; never persist it
+  static dynamic _withoutSecrets(dynamic value) {
+    if (value is Map) {
+      return {
+        for (final entry in value.entries)
+          if (entry.key != 'password') entry.key: _withoutSecrets(entry.value),
+      };
+    }
+    if (value is List) return value.map(_withoutSecrets).toList();
+    return value;
+  }
 
   String? _extractToken(Map<String, dynamic> data) {
     for (final key in const [
@@ -241,6 +261,8 @@ class AuthProvider extends ChangeNotifier {
   String _firstNonEmpty(List<dynamic> values) {
     for (final v in values) {
       if (v is String && v.trim().isNotEmpty) return v.trim();
+      // Ids arrive as numbers
+      if (v is num) return v.toString();
     }
     return '';
   }
@@ -251,8 +273,17 @@ class AuthProvider extends ChangeNotifier {
     int userType,
   ) {
     Map<String, dynamic> userData = {};
-    for (final key in const ['user', 'data', 'result', 'response', 'profile']) {
-      final nested = data[key];
+    for (final key in const [
+      'user_details',
+      'user',
+      'data',
+      'result',
+      'response',
+      'profile',
+    ]) {
+      var nested = data[key];
+      // user_details arrives as a one-element list
+      if (nested is List && nested.isNotEmpty) nested = nested.first;
       if (nested is Map<String, dynamic>) {
         userData = nested;
         break;
@@ -260,10 +291,17 @@ class AuthProvider extends ChangeNotifier {
     }
     if (userData.isEmpty) userData = data;
 
+    final nameParts = [
+      userData['first_name'],
+      userData['middle_name'],
+      userData['last_name'],
+    ].whereType<String>().map((p) => p.trim()).where((p) => p.isNotEmpty);
+
     final name = _firstNonEmpty([
       userData['name'],
       userData['full_name'],
       userData['fullname'],
+      nameParts.join(' '),
       data['name'],
       data['full_name'],
       fallbackUsername,
@@ -272,6 +310,7 @@ class AuthProvider extends ChangeNotifier {
     final email = _firstNonEmpty([
       userData['email'],
       userData['email_id'],
+      userData['official_email'],
       data['email'],
       data['email_id'],
     ]);
@@ -279,6 +318,7 @@ class AuthProvider extends ChangeNotifier {
     final phone = _firstNonEmpty([
       userData['phone'],
       userData['phone_number'],
+      userData['primary_contact_number'],
       userData['mobile'],
       userData['mobile_number'],
       data['phone'],
@@ -286,21 +326,30 @@ class AuthProvider extends ChangeNotifier {
     ]);
 
     final String userTypeLabel =
-        (userData['user_type'] ?? userData['userType'] ?? data['user_type'] ??
-                data['userType'] ?? userType) is int
-            ? AppConstants.userTypeLabels[
-                  (userData['user_type'] ?? userData['userType'] ??
-                              data['user_type'] ?? data['userType'] ??
-                              userType) as int
-              ] ??
-              userType.toString()
-            : (userData['user_type'] ?? userData['userType'] ??
-                    data['user_type'] ?? data['userType'] ?? '')
+        (userData['user_type'] ??
+                    userData['userType'] ??
+                    data['user_type'] ??
+                    data['userType'] ??
+                    userType)
+                is int
+            ? AppConstants.userTypeLabels[(userData['user_type'] ??
+                        userData['userType'] ??
+                        data['user_type'] ??
+                        data['userType'] ??
+                        userType)
+                    as int] ??
+                userType.toString()
+            : (userData['user_type'] ??
+                    userData['userType'] ??
+                    data['user_type'] ??
+                    data['userType'] ??
+                    '')
                 .toString();
 
     final company = _firstNonEmpty([
       userData['company_name'],
       userData['company'],
+      userData['store_name'],
       userData['companyName'],
       data['company_name'],
       data['company'],

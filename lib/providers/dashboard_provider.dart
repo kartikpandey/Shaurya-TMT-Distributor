@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/dashboard_model.dart';
+import '../models/network_member.dart';
 import '../services/api_service.dart';
 
 class DashboardProvider extends ChangeNotifier {
@@ -19,6 +20,10 @@ class DashboardProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get dealers => _dashboard?.dealers ?? const [];
   int get dealerCount => dealers.length;
 
+  /// The user's direct children (dealers or sub-dealers) with usable ids
+  List<NetworkMember> get children =>
+      dealers.map(NetworkMember.tryParse).whereType<NetworkMember>().toList();
+
   // Fetch distributor dashboard data
   Future<void> fetchDashboard({String? token, bool force = false}) async {
     if (_isLoading) return;
@@ -29,9 +34,7 @@ class DashboardProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final data = await ApiService.fetchDistributionDashboard(
-        token: token,
-      );
+      final data = await ApiService.fetchDistributionDashboard(token: token);
       _dashboard = DashboardModel.fromJson(data);
     } on ApiException catch (e) {
       _errorMessage = e.message;
